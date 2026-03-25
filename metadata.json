@@ -1,0 +1,8 @@
+{
+  "name": "多模态场景识别系统",
+  "description": "基于本地摄像头和麦克风的实时 AI 识别，支持情绪、人脸、手势、噪声、进出门、物体、接近远离、注视等8种场景。",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}

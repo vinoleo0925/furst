@@ -166,7 +166,13 @@ export default function App() {
         {/* Right Column: AI Assistant & Robot */}
         <div className="w-full xl:w-[380px] flex-shrink-0 flex flex-col gap-4">
           <div className="h-64 xl:h-72">
-            <RobotAvatar reaction={reaction} isSpeaking={isSpeaking} faceX={state.faceX} faceY={state.faceY} audioLevel={audioLevel} />
+            <RobotAvatar 
+              reaction={reaction} 
+              isSpeaking={isSpeaking} 
+              lookAtX={state.fastObject?.detected ? state.fastObject.x : state.faceX} 
+              lookAtY={state.fastObject?.detected ? state.fastObject.y : state.faceY} 
+              audioLevel={audioLevel} 
+            />
           </div>
           <div className="flex-1 min-h-[400px]">
             <AIAssistant videoRef={videoRef} isPlaying={isPlaying} intent={state.intent} />

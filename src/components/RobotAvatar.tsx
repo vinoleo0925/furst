@@ -7,12 +7,12 @@ import { Robot3D } from './Robot3D';
 interface RobotAvatarProps {
   reaction: RobotReaction;
   isSpeaking: boolean;
-  faceX?: number;
-  faceY?: number;
+  lookAtX?: number;
+  lookAtY?: number;
   audioLevel?: number;
 }
 
-export const RobotAvatar: React.FC<RobotAvatarProps> = ({ reaction, isSpeaking, faceX = 0, faceY = 0, audioLevel = 0 }) => {
+export const RobotAvatar: React.FC<RobotAvatarProps> = ({ reaction, isSpeaking, lookAtX = 0, lookAtY = 0, audioLevel = 0 }) => {
   return (
     <div className="bg-slate-900 rounded-3xl shadow-2xl border border-slate-800 p-0 flex flex-col items-center justify-center h-full relative overflow-hidden group">
       {/* Simulation Grid Background */}
@@ -40,8 +40,8 @@ export const RobotAvatar: React.FC<RobotAvatarProps> = ({ reaction, isSpeaking, 
             expression={reaction.expression} 
             action={reaction.action}
             isSpeaking={isSpeaking} 
-            faceX={faceX} 
-            faceY={faceY} 
+            lookAtX={lookAtX} 
+            lookAtY={lookAtY} 
             audioLevel={audioLevel} 
           />
           

@@ -37,20 +37,57 @@ const RobotModel: React.FC<Robot3DProps> = ({ expression, action, isSpeaking, fa
   const jointMat = useMemo(() => new THREE.MeshStandardMaterial({ color: '#475569', roughness: 0.8 }), []);
   const emissiveMat = useMemo(() => new THREE.MeshStandardMaterial({ color: '#60a5fa', emissive: '#60a5fa', emissiveIntensity: 4 }), []);
 
+  const aliveStateRef = useRef({
+    nextBlink: 0,
+    isBlinking: false,
+    headOffsetX: 0,
+    headOffsetY: 0,
+    weightShiftX: 0,
+    weightShiftY: 0,
+  });
+
   useFrame((state) => {
     const t = state.clock.getElapsedTime();
+    const alive = aliveStateRef.current;
+
+    // 1. Blinking Logic
+    if (t > alive.nextBlink) {
+      alive.isBlinking = true;
+      alive.nextBlink = t + 0.1; // Blink duration
+    } else if (alive.isBlinking && t > alive.nextBlink - 0.05) {
+      alive.isBlinking = false;
+      // Schedule next blink (3-6s), 10% chance for double blink
+      if (Math.random() > 0.9) {
+        alive.nextBlink = t + 0.2; // Double blink
+      } else {
+        alive.nextBlink = t + 3 + Math.random() * 3;
+      }
+    }
+
+    // 2. Micro Head Movements (Looking around slightly)
+    if (Math.random() > 0.98) {
+      alive.headOffsetX = THREE.MathUtils.lerp(alive.headOffsetX, (Math.random() - 0.5) * 0.15, 0.1);
+      alive.headOffsetY = THREE.MathUtils.lerp(alive.headOffsetY, (Math.random() - 0.5) * 0.1, 0.1);
+    }
+
+    // 3. Weight Shifting (Every 10-20s)
+    if (Math.random() > 0.995) {
+      alive.weightShiftX = THREE.MathUtils.lerp(alive.weightShiftX, (Math.random() - 0.5) * 0.1, 0.05);
+      alive.weightShiftY = THREE.MathUtils.lerp(alive.weightShiftY, (Math.random() - 0.5) * 0.05, 0.05);
+    }
 
     if (headRef.current) {
-      // Head tracking
-      const targetRotationY = faceX * 0.6;
-      const targetRotationX = faceY * -0.4;
+      // Head tracking + micro movements
+      const targetRotationY = faceX * 0.6 + alive.headOffsetX;
+      const targetRotationX = faceY * -0.4 + alive.headOffsetY;
       headRef.current.rotation.y = THREE.MathUtils.lerp(headRef.current.rotation.y, targetRotationY, 0.1);
       headRef.current.rotation.x = THREE.MathUtils.lerp(headRef.current.rotation.x, targetRotationX, 0.1);
     }
 
     if (bodyRef.current) {
-      // Breathing / Idle sway
-      bodyRef.current.position.y = Math.sin(t * 1.5) * 0.03;
+      // Breathing / Idle sway + weight shifting
+      bodyRef.current.position.y = Math.sin(t * 1.5) * 0.03 + alive.weightShiftY;
+      bodyRef.current.position.x = alive.weightShiftX;
       bodyRef.current.rotation.y = Math.sin(t * 0.5) * 0.02;
     }
 
@@ -63,7 +100,7 @@ const RobotModel: React.FC<Robot3DProps> = ({ expression, action, isSpeaking, fa
         let rightTargetX = 0;
         let leftTargetZ = 0.2 + armSway;
         let rightTargetZ = -0.2 - armSway;
-        let bodyTargetY = Math.sin(t * 1.5) * 0.03;
+        let bodyTargetY = Math.sin(t * 1.5) * 0.03 + alive.weightShiftY;
         let bodyTargetRotY = Math.sin(t * 0.5) * 0.02;
         let headTargetRotZ = 0;
 
@@ -235,7 +272,7 @@ const RobotModel: React.FC<Robot3DProps> = ({ expression, action, isSpeaking, fa
 
     // Screen expression animation
     if (screenRef.current) {
-      const blink = Math.sin(t * 3) > 0.98 ? 0.1 : 1;
+      const blink = alive.isBlinking ? 0.1 : 1;
       screenRef.current.children.forEach((child, i) => {
         if (child.name === 'eye') {
           child.scale.y = THREE.MathUtils.lerp(child.scale.y, blink, 0.5);

@@ -52,6 +52,24 @@ export const RobotConfigPanel: React.FC<RobotConfigPanelProps> = ({
   };
 
   const handleTestVoice = () => {
+    if (ttsEngine === 'edge') {
+      // Test Edge TTS
+      import('../services/edgeTtsService').then(({ generateEdgeTTS }) => {
+        generateEdgeTTS("您好，我是您的多模态助手。这是我的测试语音。", voiceId || 'zh-CN-XiaoxiaoNeural')
+          .then(buffer => {
+            const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+            ctx.decodeAudioData(buffer).then(audioBuffer => {
+              const source = ctx.createBufferSource();
+              source.buffer = audioBuffer;
+              source.connect(ctx.destination);
+              source.start();
+            });
+          })
+          .catch(console.error);
+      });
+      return;
+    }
+
     const synth = window.speechSynthesis;
     synth.cancel();
     const utterance = new SpeechSynthesisUtterance("您好，我是您的多模态助手。这是我的测试语音。");
@@ -70,6 +88,13 @@ export const RobotConfigPanel: React.FC<RobotConfigPanelProps> = ({
   };
 
   const geminiVoices = ['Puck', 'Charon', 'Kore', 'Fenrir', 'Zephyr'];
+  const edgeVoices = [
+    { id: 'zh-CN-XiaoxiaoNeural', name: '晓晓 (温柔女声)' },
+    { id: 'zh-CN-YunxiNeural', name: '云希 (阳光男声)' },
+    { id: 'zh-CN-YunjianNeural', name: '云健 (成熟男声)' },
+    { id: 'zh-CN-XiaoyiNeural', name: '晓伊 (可爱童声)' },
+    { id: 'zh-CN-YunxiaNeural', name: '云夏 (活泼男童)' }
+  ];
 
   return (
     <div className="w-full max-w-[1600px] mx-auto mb-8">
@@ -132,6 +157,7 @@ export const RobotConfigPanel: React.FC<RobotConfigPanelProps> = ({
                     }}
                     className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
+                    <option value="edge">Edge TTS (高质量开源, 推荐)</option>
                     <option value="browser">浏览器原生 TTS (本地运行, 响应快)</option>
                     <option value="gemini">Gemini TTS (云端生成, 更自然)</option>
                   </select>
@@ -145,7 +171,13 @@ export const RobotConfigPanel: React.FC<RobotConfigPanelProps> = ({
                       className="flex-1 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                     >
                       <option value="">默认音色</option>
-                      {ttsEngine === 'browser' ? (
+                      {ttsEngine === 'edge' ? (
+                        edgeVoices.map(v => (
+                          <option key={v.id} value={v.id}>
+                            {v.name}
+                          </option>
+                        ))
+                      ) : ttsEngine === 'browser' ? (
                         browserVoices.map(v => (
                           <option key={v.voiceURI} value={v.voiceURI}>
                             {v.name} ({v.lang})

@@ -2,8 +2,9 @@ import { useState, useEffect, useRef } from 'react';
 import { RecognitionState } from './useRecognition';
 import { RobotConfig, RobotReaction } from '../config/robotConfig';
 import { generateSpeech } from '../services/geminiService';
+import { generateEdgeTTS } from '../services/edgeTtsService';
 
-export type TTSEngine = 'browser' | 'gemini';
+export type TTSEngine = 'browser' | 'gemini' | 'edge';
 
 export const useRobotBehavior = (
   state: RecognitionState, 
@@ -145,6 +146,58 @@ export const useRobotBehavior = (
     }
   };
 
+  const playEdgeTTS = async (text: string) => {
+    if (audioSourceRef.current) {
+      audioSourceRef.current.stop();
+      audioSourceRef.current = null;
+    }
+    setIsSpeaking(true);
+    try {
+      const audioBufferData = await generateEdgeTTS(text, voiceId || 'zh-CN-XiaoxiaoNeural');
+      
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+        analyserRef.current = audioContextRef.current.createAnalyser();
+        analyserRef.current.fftSize = 256;
+      }
+      const ctx = audioContextRef.current;
+      const analyser = analyserRef.current!;
+      
+      const audioBuffer = await ctx.decodeAudioData(audioBufferData);
+      
+      const source = ctx.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(analyser);
+      analyser.connect(ctx.destination);
+      
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+      const updateAudioLevel = () => {
+        analyser.getByteFrequencyData(dataArray);
+        let sum = 0;
+        for (let i = 0; i < dataArray.length; i++) {
+          sum += dataArray[i];
+        }
+        const average = sum / dataArray.length;
+        setAudioLevel(average / 255); // Normalize to 0-1
+        animationFrameRef.current = requestAnimationFrame(updateAudioLevel);
+      };
+      
+      source.onended = () => {
+        setIsSpeaking(false);
+        setAudioLevel(0);
+        cancelAnimationFrame(animationFrameRef.current);
+      };
+      source.start();
+      updateAudioLevel();
+      
+      audioSourceRef.current = source;
+    } catch (error) {
+      console.error("Edge TTS failed", error);
+      setIsSpeaking(false);
+      playBrowserTTS(text);
+    }
+  };
+
   const triggerReaction = (newReaction: RobotReaction, priority: number) => {
     lastReactionTimeRef.current = Date.now();
     lastInteractionTimeRef.current = Date.now();
@@ -172,6 +225,8 @@ export const useRobotBehavior = (
     if (trimmedTts) {
       if (ttsEngine === 'gemini') {
         playGeminiTTS(trimmedTts);
+      } else if (ttsEngine === 'edge') {
+        playEdgeTTS(trimmedTts);
       } else {
         playBrowserTTS(trimmedTts);
       }
@@ -198,6 +253,9 @@ export const useRobotBehavior = (
     const now = Date.now();
     const timeSinceLast = now - lastReactionTimeRef.current;
     
+    // Global Cooldown: 8 seconds after any active interaction
+    const isGlobalCooldown = timeSinceLast < 8000 && currentPriorityRef.current > 0 && currentPriorityRef.current < 4;
+
     // Priority decay: after 5 seconds, reset priority to 0 so new events can trigger
     if (timeSinceLast > 5000) {
       currentPriorityRef.current = 0;
@@ -207,14 +265,14 @@ export const useRobotBehavior = (
     let desiredPriority = 0;
     let eventKey = '';
 
-    // 1. Loud Noise Priority (4)
+    // 1. Loud Noise Priority (P0 = 4)
     if (state.isLoud) {
       desiredReaction = config.events.loud_noise;
       desiredPriority = 4;
       eventKey = 'loud';
     } 
-    // 2. Gesture Priority (3)
-    else if (state.gesture) {
+    // 2. Gesture Priority (P1 = 3)
+    else if (state.gesture && !isGlobalCooldown) {
       const gestureReaction = config.gestures[state.gesture];
       if (gestureReaction) {
         desiredReaction = gestureReaction;
@@ -222,8 +280,8 @@ export const useRobotBehavior = (
         eventKey = `gesture_${state.gesture}`;
       }
     } 
-    // 3. Emotion Priority (2)
-    else if (state.emotion && state.emotion !== 'neutral') {
+    // 3. Emotion Priority (P2 = 2)
+    else if (state.emotion && state.emotion !== 'neutral' && !isGlobalCooldown) {
       const emotionReaction = config.emotions[state.emotion];
       if (emotionReaction) {
         desiredReaction = emotionReaction;
@@ -231,8 +289,8 @@ export const useRobotBehavior = (
         eventKey = `emotion_${state.emotion}`;
       }
     } 
-    // 4. Gaze & Attention Logic (1)
-    else if (state.isLooking && state.faceSize > 0.05) {
+    // 4. Gaze & Attention Logic (P2 = 1)
+    else if (state.isLooking && state.faceSize > 0.05 && !isGlobalCooldown) {
       if (gazeStartTimeRef.current === 0) {
         gazeStartTimeRef.current = now;
         lastGazeTriggerRef.current = 0;
@@ -260,11 +318,11 @@ export const useRobotBehavior = (
           desiredPriority = 1;
           eventKey = 'gaze_15s';
           lastGazeTriggerRef.current = 15;
-        } else if (gazeDuration >= 5 && lastGazeTriggerRef.current < 5) {
+        } else if (gazeDuration >= 3 && lastGazeTriggerRef.current < 3) {
           desiredReaction = config.events.gaze_5s;
           desiredPriority = 1;
           eventKey = 'gaze_5s';
-          lastGazeTriggerRef.current = 5;
+          lastGazeTriggerRef.current = 3;
         }
       }
     } else {
@@ -272,8 +330,21 @@ export const useRobotBehavior = (
       lastGazeTriggerRef.current = 0;
     }
 
-    // 5. Proactive Behavior (0.5)
-    if (state.faceDetected && state.faceSize > 0.05) {
+    // 5. Dynamic Object Tracking (P3 = 0.8)
+    if (state.fastObject?.detected && !desiredReaction && !isGlobalCooldown) {
+      desiredReaction = { expression: 'surprised', action: '跟踪物体', tts: '' };
+      desiredPriority = 0.8;
+      eventKey = 'fast_object';
+    } else if (state.objects.length > 0 && !desiredReaction && !isGlobalCooldown) {
+      if (state.approaching || state.movingAway) {
+        desiredReaction = { expression: 'neutral', action: '观察环境', tts: '' };
+        desiredPriority = 0.8;
+        eventKey = 'motion_tracking';
+      }
+    }
+
+    // 6. Proactive Behavior (P3 = 0.5)
+    if (state.faceDetected && state.faceSize > 0.05 && !isGlobalCooldown) {
       if (userPresentStartTimeRef.current === 0) {
         userPresentStartTimeRef.current = now;
       }

@@ -65,6 +65,7 @@ export type RecognitionState = {
   faceSize: number;
   faceX: number;
   faceY: number;
+  fastObject: { detected: boolean; x: number; y: number; speed: number } | null;
 };
 
 export interface RecognitionConfig {
@@ -107,6 +108,7 @@ export const useRecognition = (
     faceSize: 0,
     faceX: 0,
     faceY: 0,
+    fastObject: null,
   });
 
   const speechRecognitionRef = useRef<any>(null);
@@ -141,6 +143,7 @@ export const useRecognition = (
     exitingUntil: 0,
     approachingUntil: 0,
     movingAwayUntil: 0,
+    lastObjects: [] as Array<{ class: string, cx: number, cy: number, time: number }>,
   });
 
   const isDetectingRef = useRef(false);
@@ -509,6 +512,49 @@ export const useRecognition = (
         const objects = predictions.map(p => p.class);
         const persons = predictions.filter(p => p.class === 'person');
         
+        // Fast Object Tracking
+        const currentObjects = predictions.map(p => {
+          const cx = p.bbox[0] + p.bbox[2] / 2;
+          const cy = p.bbox[1] + p.bbox[3] / 2;
+          return { class: p.class, cx, cy, time: now, area: p.bbox[2] * p.bbox[3] };
+        });
+
+        let fastestObj = null;
+        let maxSpeed = 0;
+
+        for (const curr of currentObjects) {
+          // Find matching object in last frame
+          const prev = historyRef.current.lastObjects.find(p => p.class === curr.class);
+          if (prev) {
+            const dt = (curr.time - prev.time) / 1000; // seconds
+            if (dt > 0 && dt < 0.5) { // Valid time delta
+              const dx = (curr.cx - prev.cx) / video.videoWidth;
+              const dy = (curr.cy - prev.cy) / video.videoHeight;
+              const distance = Math.sqrt(dx*dx + dy*dy);
+              const speed = distance / dt; // screen percentage per second
+              
+              // Threshold: moving > 20% of screen per second + area > 3%
+              const areaPct = curr.area / (video.videoWidth * video.videoHeight);
+              if (speed > 0.2 && areaPct > 0.03 && speed > maxSpeed) {
+                maxSpeed = speed;
+                fastestObj = curr;
+              }
+            }
+          }
+        }
+
+        historyRef.current.lastObjects = currentObjects;
+
+        let fastObjectState = null;
+        if (fastestObj) {
+          fastObjectState = {
+            detected: true,
+            x: (fastestObj.cx / video.videoWidth) * 2 - 1,
+            y: (fastestObj.cy / video.videoHeight) * 2 - 1,
+            speed: maxSpeed
+          };
+        }
+
         let entering = false;
         let exiting = false;
         let approaching = false;
@@ -634,6 +680,7 @@ export const useRecognition = (
           faceSize,
           faceX,
           faceY,
+          fastObject: fastObjectState,
         }));
 
       } catch (err) {
